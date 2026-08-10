@@ -217,6 +217,237 @@ jobs:
       - name: Create or update automatic release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: auto-build-${{ github.run_number }}
+          PROJECT: ${{ needs.detect.outputs.project_name }}
+          LANGUAGES: ${{ needs.detect.outputs.languages }}
+          TARGETS: ${{ needs.detect.outputs.targets }}
+        run: |
+          NOTES="Automatic package for ${PROJECT}\n\nLanguages: ${LANGUAGES}\nTargets: ${TARGETS}\nCommit: ${{ github.sha }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* --prerelease --title "${PROJECT} automatic build #${{ github.run_number }}" --notes "$NOTES"
+          fi
+name: Universal Auto Package
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: universal-package-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    name: Detect project
+    runs-on: ubuntu-latest
+    outputs:
+      project_name: ${{ steps.plan.outputs.project_name }}
+      languages: ${{ steps.plan.outputs.languages }}
+      targets: ${{ steps.plan.outputs.targets }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_desktop: ${{ steps.plan.outputs.has_desktop }}
+      has_android: ${{ steps.plan.outputs.has_android }}
+      python_version: ${{ steps.plan.outputs.python_version }}
+      node_version: ${{ steps.plan.outputs.node_version }}
+      java_version: ${{ steps.plan.outputs.java_version }}
+      go_version: ${{ steps.plan.outputs.go_version }}
+      dotnet_version: ${{ steps.plan.outputs.dotnet_version }}
+    steps:
+      - name: Checkout uploaded source
+        uses: actions/checkout@v7
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Checkout universal packager
+        uses: actions/checkout@v7
+        with:
+          repository: 1346076596/universal-auto-packager
+          ref: main
+          path: packager-tools
+          persist-credentials: false
+
+      - name: Detect languages and targets
+        id: plan
+        run: >-
+          python packager-tools/.github/scripts/packager.py
+          --root source detect --github-output "$GITHUB_OUTPUT"
+
+      - name: Show build plan
+        run: |
+          echo "Project: ${{ steps.plan.outputs.project_name }}"
+          echo "Languages: ${{ steps.plan.outputs.languages }}"
+          echo "Targets: ${{ steps.plan.outputs.targets }}"
+
+  desktop:
+    name: Package ${{ matrix.target }}
+    needs: detect
+    if: needs.detect.outputs.has_desktop == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout uploaded source
+        uses: actions/checkout@v7
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Checkout universal packager
+        uses: actions/checkout@v7
+        with:
+          repository: 1346076596/universal-auto-packager
+          ref: main
+          path: packager-tools
+          persist-credentials: false
+
+      - name: Setup Python build driver
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ needs.detect.outputs.python_version }}
+
+      - name: Setup Node.js
+        if: contains(needs.detect.outputs.languages, 'node')
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ needs.detect.outputs.node_version }}
+          package-manager-cache: false
+
+      - name: Setup Java
+        if: contains(needs.detect.outputs.languages, 'java')
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ needs.detect.outputs.java_version }}
+
+      - name: Setup Go
+        if: contains(needs.detect.outputs.languages, 'go')
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ needs.detect.outputs.go_version }}
+          cache: false
+
+      - name: Setup .NET
+        if: contains(needs.detect.outputs.languages, 'dotnet')
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ needs.detect.outputs.dotnet_version }}
+
+      - name: Setup Rust
+        if: contains(needs.detect.outputs.languages, 'rust')
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Flutter
+        if: contains(needs.detect.outputs.languages, 'flutter')
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux' && (contains(needs.detect.outputs.languages, 'flutter') || contains(needs.detect.outputs.languages, 'tauri'))
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Build and archive
+        run: >-
+          python packager-tools/.github/scripts/packager.py
+          --root source build --target "${{ matrix.target }}"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-${{ matrix.target }}
+          path: source/.packager/artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  android:
+    name: Package Android APK and AAB
+    needs: detect
+    if: needs.detect.outputs.has_android == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout uploaded source
+        uses: actions/checkout@v7
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Checkout universal packager
+        uses: actions/checkout@v7
+        with:
+          repository: 1346076596/universal-auto-packager
+          ref: main
+          path: packager-tools
+          persist-credentials: false
+
+      - name: Setup Python build driver
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ needs.detect.outputs.python_version }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ needs.detect.outputs.java_version }}
+
+      - name: Setup Node.js
+        if: contains(needs.detect.outputs.languages, 'node')
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ needs.detect.outputs.node_version }}
+          package-manager-cache: false
+
+      - name: Setup Flutter
+        if: contains(needs.detect.outputs.languages, 'flutter')
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Android packages
+        run: >-
+          python packager-tools/.github/scripts/packager.py
+          --root source build --target android
+
+      - name: Upload Android package
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-android
+          path: source/.packager/artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish ready-to-use packages
+    needs: [detect, desktop, android]
+    if: >-
+      always() &&
+      (needs.desktop.result == 'success' || needs.android.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@v7
+        with:
+          pattern: package-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or update automatic release
+        env:
+          GH_TOKEN: ${{ github.token }}
           TAG: auto-build-${{ github.run_number }}
           PROJECT: ${{ needs.detect.outputs.project_name }}
           LANGUAGES: ${{ needs.detect.outputs.languages }}
