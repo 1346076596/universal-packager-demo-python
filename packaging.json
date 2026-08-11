@@ -1,0 +1,50 @@
+{
+  "name": "SolarTracker",
+  "languages": ["python", "node"],
+  "targets": ["windows-x64"],
+  "versions": {
+    "python": "3.12",
+    "node": "24"
+  },
+  "commands": {
+    "windows-x64": [
+      {
+        "run": "powershell -NoProfile -Command \"Expand-Archive -LiteralPath 'GPT-v1-source.zip' -DestinationPath . -Force\""
+      },
+      {
+        "run": "npm install --global pnpm@11.9.0"
+      },
+      {
+        "run": "pnpm --dir frontend install --frozen-lockfile"
+      },
+      {
+        "run": "pnpm --dir frontend test"
+      },
+      {
+        "run": "pnpm --dir frontend build"
+      },
+      {
+        "run": "python -m pip install --upgrade pip"
+      },
+      {
+        "run": "python -m pip install -e \"backend[test,build]\" ruff"
+      },
+      {
+        "run": "python -m pytest -p no:cacheprovider backend/tests"
+      },
+      {
+        "run": "python -m ruff check --no-cache backend/app packaging/desktop_entry.py"
+      },
+      {
+        "run": "python -m PyInstaller --noconfirm --clean packaging/solar_tracker.spec"
+      }
+    ]
+  },
+  "artifacts": {
+    "windows-x64": [
+      "dist/SolarTracker.exe",
+      "GitHub_EXE打包说明.md",
+      ".env.example"
+    ]
+  }
+}
