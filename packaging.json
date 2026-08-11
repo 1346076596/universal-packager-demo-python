@@ -36,7 +36,7 @@
         "run": "python -m ruff check --no-cache backend/app packaging/desktop_entry.py"
       },
       {
-        "run": "python -m PyInstaller --noconfirm --clean packaging/solar_tracker.spec"
+        "run": "python -m PyInstaller --noconfirm --clean --distpath output packaging/solar_tracker.spec"
       }
     ]
   },
