@@ -42,7 +42,7 @@
   },
   "artifacts": {
     "windows-x64": [
-      "dist/SolarTracker.exe",
+      "output/SolarTracker.exe",
       "GitHub_EXE打包说明.md",
       ".env.example"
     ]
